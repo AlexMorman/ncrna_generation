@@ -1,0 +1,42 @@
+seed: 42
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  max_seq_len: 200
+  train_split: 0.8
+
+model:
+  encoder:
+    node_input_dim: 3    # structure one-hot: '.', '(', ')'
+    hidden_dim: 128
+    num_heads: 4
+    num_layers: 3
+    dropout: 0.1
+    edge_dim: 2           # backbone, base-pair
+
+  decoder:
+    embed_dim: 64
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.1
+    vocab_size: 4          # A, U, G, C
+
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  num_epochs: 100
+  teacher_forcing_ratio: 0.5
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  scheduler_patience: 5
+  scheduler_factor: 0.5
+
+inference:
+  beam_k: 5
+  max_len: 200
+  temperature: 1.0
+
+oracle:
+  mfe_threshold: -5.0
+  similarity_threshold: 0.8

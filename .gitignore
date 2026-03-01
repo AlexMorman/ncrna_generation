@@ -1,0 +1,29 @@
+# Data files (keep directory structure via .gitkeep)
+data/raw/*.txt
+data/raw/*.bprna
+data/processed/*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Model artifacts
+*.pt
+!data/processed/.gitkeep
+
+# Plots
+loss_curves.png
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
