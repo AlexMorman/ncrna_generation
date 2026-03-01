@@ -66,7 +66,8 @@ for acc in ACCESSIONS:
     # RFAM REST API — seed alignment in Stockholm format
     url = f"https://rfam.xfam.org/family/{acc}/alignment?acc={acc}&format=stockholm&download=1"
     print(f"Downloading {acc} …", end=" ")
-    resp = requests.get(url, timeout=60)
+    # Added verify=False to bypass SSL certificate verification
+    resp = requests.get(url, timeout=60, verify=False)
     if resp.status_code == 200:
         out_path.write_bytes(resp.content)
         print(f"saved ({len(resp.content) // 1024} KB)")
@@ -74,7 +75,7 @@ for acc in ACCESSIONS:
         print(f"FAILED (HTTP {resp.status_code}) — download manually from rfam.xfam.org")
     time.sleep(1)   # be polite to the EBI servers
 
-print("\nFiles in data/raw/:")
+print("\nFiles in data/raw/")
 !ls -lh data/raw/
 ```
 
