@@ -1,10 +1,25 @@
 """dataset.py — PyTorch Geometric Dataset class and graph construction.
 
-Parses Eterna/bpRNA files in FASTA-like format::
+Supports two raw data formats:
+
+**FASTA-like** (``.txt`` / ``.bprna``)::
 
     >sample_id
     AUGCAUGC
     ((....))
+
+**Stockholm / RFAM** (``.sto``)::
+
+    # STOCKHOLM 1.0
+    seq1   GCUUCG...
+    seq2   GCUUCG...
+    #=GC SS_cons  <<<<<...>>>>>
+    //
+
+Stockholm ``SS_cons`` notation is converted to standard dot-bracket:
+``< ( [ {`` → ``(``,  ``> ) ] }`` → ``)``,  everything else → ``.``.
+Base pairs are retained only when **both** partners are present in the
+individual aligned sequence; gapped-out partners become unpaired.
 
 Converts dot-bracket secondary structures into graphs:
   - **Nodes:** one per nucleotide position
@@ -203,6 +218,135 @@ def parse_rna_file(filepath: str) -> List[Tuple[str, str, str]]:
     return samples
 
 
+# ── Stockholm parsing ───────────────────────────────────────────────────────
+
+
+def _build_pair_map(ss_cons: str) -> dict[int, int]:
+    """Build a position-to-partner map from a Stockholm SS_cons string.
+
+    Handles the full RFAM bracket alphabet: ``<>``, ``()``, ``[]``, ``{}``.
+    Pseudoknot letters (uppercase/lowercase A-Z outside the above) are
+    ignored and treated as unpaired.
+
+    Args:
+        ss_cons: Raw ``SS_cons`` string from a Stockholm file.
+
+    Returns:
+        Dict mapping each paired column index to its partner index.
+    """
+    pair_map: dict[int, int] = {}
+    stack: list[int] = []
+    for i, c in enumerate(ss_cons):
+        if c in "<([{":
+            stack.append(i)
+        elif c in ">)]}":
+            if stack:
+                j = stack.pop()
+                pair_map[j] = i
+                pair_map[i] = j
+    return pair_map
+
+
+def _degap_sequence_and_structure(
+    aligned_seq: str,
+    pair_map: dict[int, int],
+) -> Tuple[str, str]:
+    """Remove gap columns and produce a valid dot-bracket structure.
+
+    A base pair is kept only when **both** partner columns contain a
+    nucleotide in this particular sequence; otherwise the position is
+    written as unpaired.  Ambiguous nucleotides (N, R, Y, …) are skipped.
+
+    Args:
+        aligned_seq: Aligned sequence string (gaps are ``-`` or ``.``).
+        pair_map:    Precomputed column pairing from :func:`_build_pair_map`.
+
+    Returns:
+        ``(sequence, structure)`` — gap-free nucleotide string and its
+        dot-bracket structure.
+    """
+    kept: set[int] = {
+        i for i, c in enumerate(aligned_seq) if c not in "-. \t"
+    }
+
+    seq_chars: list[str] = []
+    struct_chars: list[str] = []
+
+    for i in sorted(kept):
+        nuc = aligned_seq[i].upper().replace("T", "U")
+        if nuc not in NUC_TO_IDX:
+            continue  # ambiguous nucleotide — skip position entirely
+        seq_chars.append(nuc)
+
+        if i in pair_map:
+            partner = pair_map[i]
+            if partner in kept:
+                struct_chars.append("(" if partner > i else ")")
+            else:
+                struct_chars.append(".")
+        else:
+            struct_chars.append(".")
+
+    return "".join(seq_chars), "".join(struct_chars)
+
+
+def parse_stockholm_file(filepath: str) -> List[Tuple[str, str, str]]:
+    """Parse an RFAM Stockholm alignment file (``.sto``).
+
+    Reads all sequence rows and the ``#=GC SS_cons`` consensus structure
+    (concatenating fragments across multiple alignment blocks), then
+    degaps each sequence and derives its individual dot-bracket structure
+    via :func:`_degap_sequence_and_structure`.
+
+    Args:
+        filepath: Path to the ``.sto`` file.
+
+    Returns:
+        List of ``(name, sequence, structure)`` tuples.
+
+    Raises:
+        ValueError: If no ``#=GC SS_cons`` annotation is found.
+    """
+    sequences: dict[str, str] = {}
+    ss_parts: list[str] = []
+
+    with open(filepath, "r") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line or line.startswith("//"):
+                continue
+            if line.startswith("#=GC SS_cons"):
+                parts = line.split(None, 2)
+                if len(parts) == 3:
+                    ss_parts.append(parts[2])
+            elif line.startswith("#"):
+                continue  # GF / GS / GR annotations
+            else:
+                parts = line.split()
+                if len(parts) == 2:
+                    name, fragment = parts
+                    sequences[name] = sequences.get(name, "") + fragment
+
+    if not ss_parts:
+        raise ValueError(
+            f"No '#=GC SS_cons' line found in {filepath}. "
+            "Ensure the file is a valid Stockholm/RFAM alignment."
+        )
+
+    ss_cons = "".join(ss_parts)
+    pair_map = _build_pair_map(ss_cons)
+
+    samples: List[Tuple[str, str, str]] = []
+    for name, aligned_seq in sequences.items():
+        if len(aligned_seq) != len(ss_cons):
+            continue  # malformed block — skip
+        seq, struct = _degap_sequence_and_structure(aligned_seq, pair_map)
+        if len(seq) >= 2:
+            samples.append((name, seq, struct))
+
+    return samples
+
+
 # ── PyG Dataset ─────────────────────────────────────────────────────────────
 
 
@@ -242,7 +386,7 @@ class RNAGraphDataset(InMemoryDataset):
             return sorted(
                 f
                 for f in os.listdir(self.raw_dir)
-                if f.endswith((".txt", ".bprna"))
+                if f.endswith((".txt", ".bprna", ".sto"))
             )
         return []
 
@@ -260,18 +404,22 @@ class RNAGraphDataset(InMemoryDataset):
         raw_files = [
             os.path.join(self.raw_dir, f)
             for f in os.listdir(self.raw_dir)
-            if f.endswith((".txt", ".bprna"))
+            if f.endswith((".txt", ".bprna", ".sto"))
         ]
 
         if not raw_files:
             raise FileNotFoundError(
-                f"No .txt or .bprna files found in {self.raw_dir}. "
-                "Please add RNA data files in FASTA-like format:\n"
-                "  >sample_id\n  SEQUENCE\n  STRUCTURE"
+                f"No data files found in {self.raw_dir}. "
+                "Accepted formats:\n"
+                "  .sto  — Stockholm/RFAM alignment\n"
+                "  .txt / .bprna  — FASTA-like (>id / sequence / structure)"
             )
 
         for filepath in sorted(raw_files):
-            samples = parse_rna_file(filepath)
+            if filepath.endswith(".sto"):
+                samples = parse_stockholm_file(filepath)
+            else:
+                samples = parse_rna_file(filepath)
             for name, sequence, structure in samples:
                 if self.max_seq_len > 0 and len(sequence) > self.max_seq_len:
                     continue
