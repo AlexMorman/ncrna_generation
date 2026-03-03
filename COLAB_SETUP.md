@@ -43,11 +43,13 @@ PyTorch is pre-installed on Colab.  Install the remaining packages:
 
 ---
 
-## Cell 3 — Download RFAM training data (RF00001–RF00010)
+## Cell 3 — Download RFAM training data (RF00001–RF00500)
 
 RFAM seed alignments are available in Stockholm format from the EBI.
 The cell below fetches the seed alignment for each family and saves it
-directly into `data/raw/`.
+directly into `data/raw/`. Downloading 500 families takes ~10–15 minutes
+depending on connection speed; the loop is rate-limited to one request per
+second to be polite to the EBI servers.
 
 ```python
 import requests, pathlib, time
@@ -55,7 +57,7 @@ import requests, pathlib, time
 RAW_DIR = pathlib.Path("data/raw")
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-ACCESSIONS = [f"RF{i:05d}" for i in range(1, 11)]  # RF00001 … RF00010
+ACCESSIONS = [f"RF{i:05d}" for i in range(1, 501)]  # RF00001 … RF00500
 
 for acc in ACCESSIONS:
     out_path = RAW_DIR / f"{acc}.sto"
@@ -104,7 +106,12 @@ Expected output (lengths vary by family):
 RF00001.sto: 712 sequences, e.g. len=119 — GCCUACGGCCAUACCACGUU…
 RF00002.sto: 954 sequences, e.g. len=71  — GCGGAUUUAGCUCAGUUGGG…
 ...
+RF00500.sto: <N> sequences, e.g. len=<L> — …
 ```
+
+> **Note:** Not all accessions in RF00001–RF00500 exist; the download cell
+> will print `FAILED (HTTP 404)` for missing families and continue — this is
+> expected.
 
 ---
 
@@ -114,13 +121,21 @@ RF00002.sto: 954 sequences, e.g. len=71  — GCGGAUUUAGCUCAGUUGGG…
 !python train.py --config configs/config.yaml
 ```
 
-Training prints one line per epoch:
+> **Note:** The first run with 500 families will spend several minutes
+> building the processed graph cache (`data/processed/data.pt`) before
+> training begins. Subsequent runs load the cache instantly.
+
+Training prints one line per epoch.  Teacher forcing (`TF`) is annealed
+from 1.0 down to 0.1 over the run, and training stops automatically when
+validation loss has not improved for 15 consecutive epochs:
 
 ```
-Epoch   1 | Train 1.3862 | Val 1.3801 | Acc 0.2643 | LR 1.00e-03
-Epoch   2 | Train 1.2104 | Val 1.1893 | Acc 0.3511 | LR 1.00e-03
-...
+Epoch   1 | Train 1.3862 | Val 1.3801 | Acc 0.2643 | LR 1.00e-03 | TF 1.00
+  -> Saved best model (val_loss=1.3801)
+Epoch   2 | Train 1.2104 | Val 1.1893 | Acc 0.3511 | LR 1.00e-03 | TF 0.99
   -> Saved best model (val_loss=1.1893)
+...
+Early stopping at epoch 42 (no improvement for 15 epochs).
 ```
 
 The best checkpoint is saved to `best_model.pt` in the current directory.
@@ -128,12 +143,40 @@ Loss curves are saved to `loss_curves.png`.
 
 ---
 
-## Cell 6 — View loss curves
+## Cell 6 — View training visualizations
+
+Training produces two image files. Display them to analyse the run:
+
+### `loss_curves.png` — Loss and accuracy over epochs
 
 ```python
-from IPython.display import Image
-Image("loss_curves.png")
+from IPython.display import Image, display
+display(Image("loss_curves.png"))
 ```
+
+Two panels:
+
+| Panel | What it shows | What to look for |
+|---|---|---|
+| **Top — Loss** | Train loss (blue) and val loss (orange) per epoch. A dashed grey line marks the random-guessing baseline (ln 4 ≈ 1.386). | Val loss should trend *below* the baseline. A large train/val gap means overfitting. |
+| **Bottom — Accuracy** | Validation accuracy per epoch. A dashed grey line marks the random baseline (0.25). | Accuracy should rise above 0.25 and plateau. |
+
+---
+
+### `diagnostics.png` — Post-training diagnostics (best checkpoint)
+
+```python
+display(Image("diagnostics.png"))
+```
+
+Four panels computed on the validation set using the best saved checkpoint:
+
+| Panel | What it shows | What to look for |
+|---|---|---|
+| **Top-left — Confusion matrix** | Row-normalised 4×4 heatmap (A/U/G/C true vs predicted). Raw counts appear below each fraction. | A healthy model has a bright diagonal. A single bright column means mode collapse — the model predicts one nucleotide for everything. |
+| **Top-right — Per-class accuracy** | Accuracy for each nucleotide separately vs the 0.25 random baseline. | Large imbalances (e.g. G/C accuracy high, A/U low) reveal class-specific failures. |
+| **Bottom-left — Nucleotide frequency** | Grouped bars comparing the ground-truth nucleotide distribution (green) against the model's predicted distribution (blue). | Bars should roughly match. A blue bar that towers over its green partner signals a strong prediction bias. |
+| **Bottom-right — Base-pair satisfaction** | Fraction of base-paired positions where the two predicted nucleotides form a valid Watson-Crick or G-U wobble pair, vs the random baseline (≈ 0.375) and a perfect score (1.0). | This is the primary domain metric. A model above 0.375 has learned *something* about RNA pairing; a model near 0.375 has not. |
 
 ---
 
@@ -183,13 +226,14 @@ All hyperparameters live in `configs/config.yaml`.  Edit them directly
 in Colab:
 
 ```python
-# Example: double batch size, increase beam width
+# Example: double batch size, increase beam width, extend early stopping patience
 import yaml, pathlib
 
 cfg_path = pathlib.Path("configs/config.yaml")
 cfg = yaml.safe_load(cfg_path.read_text())
 
 cfg["training"]["batch_size"] = 64
+cfg["training"]["early_stopping_patience"] = 20
 cfg["inference"]["beam_k"] = 10
 
 cfg_path.write_text(yaml.dump(cfg))

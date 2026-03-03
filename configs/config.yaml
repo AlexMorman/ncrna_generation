@@ -9,28 +9,30 @@ data:
 model:
   encoder:
     node_input_dim: 3    # structure one-hot: '.', '(', ')'
-    hidden_dim: 128
+    hidden_dim: 64
     num_heads: 4
-    num_layers: 3
-    dropout: 0.1
+    num_layers: 2
+    dropout: 0.3
     edge_dim: 2           # backbone, base-pair
 
   decoder:
     embed_dim: 64
-    hidden_dim: 128
-    num_layers: 2
-    dropout: 0.1
+    hidden_dim: 64
+    num_layers: 1
+    dropout: 0.3
     vocab_size: 4          # A, U, G, C
 
 training:
   batch_size: 32
   learning_rate: 0.001
   num_epochs: 100
-  teacher_forcing_ratio: 0.5
-  weight_decay: 1.0e-5
+  teacher_forcing_start: 1.0
+  teacher_forcing_end: 0.1
+  weight_decay: 1.0e-3
   grad_clip: 1.0
   scheduler_patience: 5
   scheduler_factor: 0.5
+  early_stopping_patience: 15
 
 inference:
   beam_k: 5

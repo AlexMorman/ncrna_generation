@@ -3,19 +3,19 @@
 ## Project Overview
 A deep learning pipeline for generating novel non-coding RNA sequences
 using a Graph Attention Network (GAT) encoder and GRU decoder architecture.
-Trained on Eterna/bpRNA datasets. Designed to run on Google Colab GPU hardware.
+Trained on RFAM seed alignments (RF00001–RF00500). Designed to run on Google Colab GPU hardware.
 
 ## Architecture
 - **Encoder:** Graph Attention Network (GAT) via PyTorch Geometric
 - **Decoder:** GRU with attention mechanism, autoregressive generation
-- **Training:** Teacher Forcing with Cross-Entropy loss
+- **Training:** Scheduled teacher forcing (annealed 1.0→0.1) with Cross-Entropy loss, early stopping
 - **Inference:** Beam Search (top-k paths) + ViennaRNA thermodynamic filtering
 
 ## File Structure
 ```
 ncrna_generation/
 ├── data/
-│   ├── raw/                # Eterna/bpRNA sequence files (dot-bracket format)
+│   ├── raw/                # RFAM Stockholm (.sto) or FASTA-like (.txt/.bprna) files
 │   └── processed/          # PyTorch Geometric Data objects (cached tensors)
 ├── configs/
 │   └── config.yaml         # All hyperparameters (lr, batch_size, beam_k, etc.)
@@ -36,7 +36,7 @@ ncrna_generation/
 2. `encoder.py` GAT consumes Data objects → rich structural embeddings
 3. `decoder.py` GRU takes embeddings → autoregressively generates sequences
 4. `model.py` connects encoder and decoder via forward() pass
-5. `train.py` runs the training loop with Teacher Forcing and Cross-Entropy loss
+5. `train.py` runs the training loop with scheduled teacher forcing (annealed 1.0→0.1 over epochs), early stopping (patience=15), and a seeded random 80/20 train/val split
 6. `inference.py` runs Beam Search on new dot-bracket inputs → oracle filters results
 
 ## Key Constraints
