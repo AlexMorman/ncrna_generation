@@ -25,3 +25,9 @@
 **Usage**
 
 * See `COLAB_SETUP.md` for step-by-step instructions to train and run inference on Google Colab
+
+**AI Disclosure**
+
+* The code in this repo was written with assistance from Claude Code CLI tool.
+* Human oversight was present - but I am not a biology subject matter expert.
+* Model inferences should be used with caution, as there is risk of inaccurate inferences.
