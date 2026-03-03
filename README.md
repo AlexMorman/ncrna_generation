@@ -30,4 +30,4 @@
 
 * The code in this repo was written with assistance from Claude Code CLI tool.
 * Human oversight was present - but I am not a biology subject matter expert.
-* Model inferences should be used with caution, as there is risk of inaccurate inferences.
+* Model inferences should be used with caution, as there is risk of non-scientfic biases causing error.
