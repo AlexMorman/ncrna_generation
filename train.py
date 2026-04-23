@@ -4,7 +4,7 @@ Usage::
 
     python train.py --config configs/config.yaml
 
-Reads ``.ss_ct`` structure-sequence pairs via :class:`RNAGraphDataset`,
+Reads ``.ss.ct`` structure-sequence pairs via :class:`RNAGraphDataset`,
 trains the :class:`NcRNADesigner` model, saves the best checkpoint to
 ``best_model.pt``, and writes:
 

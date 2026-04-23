@@ -1,9 +1,9 @@
 """dataset.py — PyTorch Geometric Dataset class and graph construction.
 
-Supports CT-format (``.ss_ct``) files for training and Stockholm (``.sto``)
+Supports CT-format (``.ss.ct``) files for training and Stockholm (``.sto``)
 files for evaluation.
 
-**CT format** (``.ss_ct``)::
+**CT format** (``.ss.ct``)::
 
     72 sequence_name
     1 G 0 2 71 1
@@ -191,7 +191,7 @@ def parse_ct_file(filepath: str) -> Tuple[str, str, str]:
       - Field 6: natural-numbering index (unused)
 
     Args:
-        filepath: Path to the ``.ss_ct`` file.
+        filepath: Path to the ``.ss.ct`` file.
 
     Returns:
         ``(name, sequence, dot_bracket)`` triple — same contract as other
@@ -434,7 +434,7 @@ def parse_stockholm_file(filepath: str) -> List[Tuple[str, str, str]]:
 class RNAGraphDataset(InMemoryDataset):
     """PyTorch Geometric InMemoryDataset for RNA structure–sequence pairs.
 
-    Reads ``.ss_ct`` files from ``<root>/raw/<target_family>/``, parses them
+    Reads ``.ss.ct`` files from ``<root>/raw/<target_family>/``, parses them
     with :func:`parse_ct_file`, converts each sample to a graph via
     :func:`structure_to_data`, and caches the result in
     ``<root>/processed/<target_family>/data.pt``.
@@ -473,10 +473,10 @@ class RNAGraphDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self) -> List[str]:
-        """Return sorted list of ``.ss_ct`` files found in the family raw dir."""
+        """Return sorted list of ``.ss.ct`` files found in the family raw dir."""
         if os.path.isdir(self.raw_dir):
             return sorted(
-                f for f in os.listdir(self.raw_dir) if f.endswith(".ss_ct")
+                f for f in os.listdir(self.raw_dir) if f.endswith(".ss.ct")
             )
         return []
 
@@ -488,7 +488,7 @@ class RNAGraphDataset(InMemoryDataset):
         """No automatic download — users must provide their own data."""
 
     def process(self) -> None:
-        """Read raw ``.ss_ct`` files, build graphs, and save processed dataset."""
+        """Read raw ``.ss.ct`` files, build graphs, and save processed dataset."""
         if not os.path.isdir(self.raw_dir):
             raise FileNotFoundError(
                 f"Raw data directory not found: {self.raw_dir}"
@@ -497,12 +497,12 @@ class RNAGraphDataset(InMemoryDataset):
         raw_files = sorted(
             os.path.join(self.raw_dir, f)
             for f in os.listdir(self.raw_dir)
-            if f.endswith(".ss_ct")
+            if f.endswith(".ss.ct")
         )
 
         if not raw_files:
             raise FileNotFoundError(
-                f"No .ss_ct files found in {self.raw_dir}. "
+                f"No .ss.ct files found in {self.raw_dir}. "
                 "Provide CT-format files for training."
             )
 
@@ -535,7 +535,7 @@ class RNAGraphDataset(InMemoryDataset):
         if not data_list:
             raise ValueError(
                 "No valid samples produced after processing. "
-                "Check your .ss_ct files."
+                "Check your .ss.ct files."
             )
 
         os.makedirs(self.processed_dir, exist_ok=True)
