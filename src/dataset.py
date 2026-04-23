@@ -1,25 +1,22 @@
 """dataset.py — PyTorch Geometric Dataset class and graph construction.
 
-Supports two raw data formats:
+Supports CT-format (``.ss_ct``) files for training and Stockholm (``.sto``)
+files for evaluation.
 
-**FASTA-like** (``.txt`` / ``.bprna``)::
+**CT format** (``.ss_ct``)::
 
-    >sample_id
-    AUGCAUGC
-    ((....))
+    72 sequence_name
+    1 G 0 2 71 1
+    2 C 1 3 70 2
+    ...
 
-**Stockholm / RFAM** (``.sto``)::
+**Stockholm / RFAM** (``.sto``) — used by evaluation only::
 
     # STOCKHOLM 1.0
     seq1   GCUUCG...
     seq2   GCUUCG...
     #=GC SS_cons  <<<<<...>>>>>
     //
-
-Stockholm ``SS_cons`` notation is converted to standard dot-bracket:
-``< ( [ {`` → ``(``,  ``> ) ] }`` → ``)``,  everything else → ``.``.
-Base pairs are retained only when **both** partners are present in the
-individual aligned sequence; gapped-out partners become unpaired.
 
 Converts dot-bracket secondary structures into graphs:
   - **Nodes:** one per nucleotide position
@@ -41,8 +38,6 @@ from torch_geometric.data import Data, InMemoryDataset
 NUC_TO_IDX = {"A": 0, "U": 1, "G": 2, "C": 3}
 IDX_TO_NUC = {v: k for k, v in NUC_TO_IDX.items()}
 STRUCT_TO_IDX = {".": 0, "(": 1, ")": 2}
-SOS_TOKEN = 4
-PAD_TOKEN = 5
 
 
 # ── Dot-bracket parsing ────────────────────────────────────────────────────
@@ -171,51 +166,137 @@ def structure_to_data(structure: str, sequence: str | None = None) -> Data:
     return data
 
 
-# ── File parsing ────────────────────────────────────────────────────────────
+# ── CT file parsing ─────────────────────────────────────────────────────────
 
 
-def parse_rna_file(filepath: str) -> List[Tuple[str, str, str]]:
-    """Parse a FASTA-like RNA data file.
+def parse_ct_file(filepath: str) -> Tuple[str, str, str]:
+    """Parse a CT-format RNA structure file.
 
-    Supported formats::
+    CT format::
 
-        >sample_id
-        SEQUENCE
-        STRUCTURE
+        72 sequence_name
+        1 G 0 2 71 1
+        2 C 1 3 70 2
+        ...
 
-    or headerless pairs::
+    Line 1: header — first token is sequence length (int); remaining tokens
+    (if any) form the name; defaults to the filename stem if absent.
 
-        SEQUENCE
-        STRUCTURE
+    Subsequent lines: 6 whitespace-separated fields:
+      - Field 1: position index (1-based)
+      - Field 2: nucleotide character
+      - Field 3: previous position (unused)
+      - Field 4: next position (unused)
+      - Field 5: pair partner index (1-based; 0 = unpaired)
+      - Field 6: natural-numbering index (unused)
 
     Args:
-        filepath: Path to the text file.
+        filepath: Path to the ``.ss_ct`` file.
 
     Returns:
-        List of ``(name, sequence, structure)`` tuples.
-    """
-    samples: List[Tuple[str, str, str]] = []
-    with open(filepath, "r") as fh:
-        lines = [ln.strip() for ln in fh if ln.strip()]
+        ``(name, sequence, dot_bracket)`` triple — same contract as other
+        parsers in this module.
 
-    i = 0
-    while i < len(lines):
-        if lines[i].startswith(">"):
-            name = lines[i][1:].strip()
-            if i + 2 >= len(lines):
-                break
-            sequence = lines[i + 1]
-            structure = lines[i + 2]
-            samples.append((name, sequence, structure))
-            i += 3
+    Raises:
+        ValueError: On row-count mismatch, asymmetric pairs, self-pairs,
+            pseudoknots (crossing base pairs), or invalid nucleotides.
+    """
+    stem = os.path.splitext(os.path.basename(filepath))[0]
+
+    with open(filepath, "r") as fh:
+        lines = [ln.rstrip("\n") for ln in fh]
+
+    # Find the header line (skip blank lines at the top)
+    header_idx = 0
+    while header_idx < len(lines) and not lines[header_idx].strip():
+        header_idx += 1
+
+    if header_idx >= len(lines):
+        raise ValueError(f"Empty CT file: {filepath}")
+
+    header_parts = lines[header_idx].split()
+    try:
+        seq_len = int(header_parts[0])
+    except (ValueError, IndexError):
+        raise ValueError(
+            f"CT file '{filepath}': header first token must be an integer "
+            f"sequence length, got '{lines[header_idx].split()[0] if lines[header_idx].split() else ''}'."
+        )
+    name = " ".join(header_parts[1:]) if len(header_parts) > 1 else stem
+
+    data_lines = [ln for ln in lines[header_idx + 1:] if ln.strip()]
+
+    if len(data_lines) != seq_len:
+        raise ValueError(
+            f"CT file '{filepath}': header declares length {seq_len} but "
+            f"found {len(data_lines)} data lines."
+        )
+
+    nucleotides: list[str] = []
+    pair_map: dict[int, int] = {}  # 1-indexed
+
+    for lineno, line in enumerate(data_lines, start=1):
+        fields = line.split()
+        if len(fields) < 6:
+            raise ValueError(
+                f"CT file '{filepath}': line {lineno + header_idx + 1} has "
+                f"fewer than 6 fields: '{line}'"
+            )
+        try:
+            pos = int(fields[0])
+            partner = int(fields[4])
+        except ValueError:
+            raise ValueError(
+                f"CT file '{filepath}': non-integer position/partner on "
+                f"line {lineno + header_idx + 1}: '{line}'"
+            )
+
+        nuc = fields[1].upper().replace("T", "U")
+        nucleotides.append(nuc)
+
+        if partner != 0:
+            if partner == pos:
+                raise ValueError(
+                    f"CT file '{filepath}': position {pos} pairs with itself."
+                )
+            pair_map[pos] = partner
+
+    # Validate symmetry
+    for i, j in pair_map.items():
+        if pair_map.get(j) != i:
+            raise ValueError(
+                f"CT file '{filepath}': asymmetric pair — position {i} "
+                f"claims partner {j}, but {j} claims partner "
+                f"{pair_map.get(j, 'none')}."
+            )
+
+    # Validate no pseudoknots (crossing pairs)
+    pairs = sorted(
+        (min(i, j), max(i, j)) for i, j in pair_map.items() if i < j
+    )
+    for k in range(len(pairs)):
+        for m in range(k + 1, len(pairs)):
+            a, b = pairs[k]
+            c, d = pairs[m]
+            if a < c < b < d:
+                raise ValueError(
+                    f"CT file '{filepath}': pseudoknot detected — pairs "
+                    f"({a},{b}) and ({c},{d}) cross."
+                )
+
+    # Build dot-bracket
+    dot_bracket_chars: list[str] = []
+    for pos in range(1, seq_len + 1):
+        if pos not in pair_map:
+            dot_bracket_chars.append(".")
+        elif pair_map[pos] > pos:
+            dot_bracket_chars.append("(")
         else:
-            sequence = lines[i]
-            if i + 1 >= len(lines):
-                break
-            structure = lines[i + 1]
-            samples.append((f"sample_{len(samples)}", sequence, structure))
-            i += 2
-    return samples
+            dot_bracket_chars.append(")")
+
+    sequence = "".join(nucleotides)
+    dot_bracket = "".join(dot_bracket_chars)
+    return name, sequence, dot_bracket
 
 
 # ── Stockholm parsing ───────────────────────────────────────────────────────
@@ -353,14 +434,15 @@ def parse_stockholm_file(filepath: str) -> List[Tuple[str, str, str]]:
 class RNAGraphDataset(InMemoryDataset):
     """PyTorch Geometric InMemoryDataset for RNA structure–sequence pairs.
 
-    Reads ``.txt`` files from ``<root>/raw/``, parses them with
-    :func:`parse_rna_file`, converts each sample to a graph via
+    Reads ``.ss_ct`` files from ``<root>/raw/<target_family>/``, parses them
+    with :func:`parse_ct_file`, converts each sample to a graph via
     :func:`structure_to_data`, and caches the result in
-    ``<root>/processed/data.pt``.
+    ``<root>/processed/<target_family>/data.pt``.
 
     Args:
-        root:          Dataset root directory (expects ``raw/`` and
-                       ``processed/`` subdirectories).
+        root:          Dataset root directory (expects ``raw/<target_family>/``
+                       and ``processed/<target_family>/`` subdirectories).
+        target_family: RFAM family identifier, e.g. ``"RF00005"``.
         max_seq_len:   Discard samples longer than this.  ``0`` means no limit.
         transform:     Optional PyG transform applied at access time.
         pre_transform: Optional PyG transform applied during processing.
@@ -369,10 +451,12 @@ class RNAGraphDataset(InMemoryDataset):
     def __init__(
         self,
         root: str,
+        target_family: str,
         max_seq_len: int = 0,
         transform=None,
         pre_transform=None,
     ):
+        self.target_family = target_family
         self.max_seq_len = max_seq_len
         super().__init__(root, transform, pre_transform)
         self.data, self.slices = torch.load(
@@ -380,13 +464,19 @@ class RNAGraphDataset(InMemoryDataset):
         )
 
     @property
+    def raw_dir(self) -> str:
+        return os.path.join(self.root, "raw", self.target_family)
+
+    @property
+    def processed_dir(self) -> str:
+        return os.path.join(self.root, "processed", self.target_family)
+
+    @property
     def raw_file_names(self) -> List[str]:
-        """Return list of raw data files found in ``raw/``."""
+        """Return sorted list of ``.ss_ct`` files found in the family raw dir."""
         if os.path.isdir(self.raw_dir):
             return sorted(
-                f
-                for f in os.listdir(self.raw_dir)
-                if f.endswith((".txt", ".bprna", ".sto"))
+                f for f in os.listdir(self.raw_dir) if f.endswith(".ss_ct")
             )
         return []
 
@@ -398,46 +488,57 @@ class RNAGraphDataset(InMemoryDataset):
         """No automatic download — users must provide their own data."""
 
     def process(self) -> None:
-        """Read raw files, build graphs, and save processed dataset."""
-        data_list: List[Data] = []
+        """Read raw ``.ss_ct`` files, build graphs, and save processed dataset."""
+        if not os.path.isdir(self.raw_dir):
+            raise FileNotFoundError(
+                f"Raw data directory not found: {self.raw_dir}"
+            )
 
-        raw_files = [
+        raw_files = sorted(
             os.path.join(self.raw_dir, f)
             for f in os.listdir(self.raw_dir)
-            if f.endswith((".txt", ".bprna", ".sto"))
-        ]
+            if f.endswith(".ss_ct")
+        )
 
         if not raw_files:
             raise FileNotFoundError(
-                f"No data files found in {self.raw_dir}. "
-                "Accepted formats:\n"
-                "  .sto  — Stockholm/RFAM alignment\n"
-                "  .txt / .bprna  — FASTA-like (>id / sequence / structure)"
+                f"No .ss_ct files found in {self.raw_dir}. "
+                "Provide CT-format files for training."
             )
 
-        for filepath in sorted(raw_files):
-            if filepath.endswith(".sto"):
-                samples = parse_stockholm_file(filepath)
-            else:
-                samples = parse_rna_file(filepath)
-            for name, sequence, structure in samples:
+        data_list: List[Data] = []
+        n_parsed = 0
+        n_skipped = 0
+        n_failed = 0
+
+        for filepath in raw_files:
+            try:
+                name, sequence, structure = parse_ct_file(filepath)
+                n_parsed += 1
                 if self.max_seq_len > 0 and len(sequence) > self.max_seq_len:
+                    n_skipped += 1
                     continue
-                try:
-                    data = structure_to_data(structure, sequence)
-                    data.name = name
-                    if self.pre_transform is not None:
-                        data = self.pre_transform(data)
-                    data_list.append(data)
-                except ValueError as exc:
-                    print(f"Skipping '{name}': {exc}")
+                data = structure_to_data(structure, sequence)
+                data.name = name
+                if self.pre_transform is not None:
+                    data = self.pre_transform(data)
+                data_list.append(data)
+            except (ValueError, OSError) as exc:
+                n_failed += 1
+                print(f"Failed '{os.path.basename(filepath)}': {exc}")
+
+        print(
+            f"CT parsing: {n_parsed} parsed, {n_skipped} skipped (len), "
+            f"{n_failed} failed → {len(data_list)} graphs"
+        )
 
         if not data_list:
             raise ValueError(
                 "No valid samples produced after processing. "
-                "Check your raw data format."
+                "Check your .ss_ct files."
             )
 
+        os.makedirs(self.processed_dir, exist_ok=True)
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
-        print(f"Processed {len(data_list)} RNA samples → {self.processed_paths[0]}")
+        print(f"Saved processed dataset → {self.processed_paths[0]}")

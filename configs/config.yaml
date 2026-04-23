@@ -1,44 +1,30 @@
 seed: 42
 
 data:
-  raw_dir: data/raw
-  processed_dir: data/processed
+  root: "data"
+  target_family: RF00005   # user-set per run
   max_seq_len: 200
   train_split: 0.8
 
 model:
-  encoder:
-    node_input_dim: 3    # structure one-hot: '.', '(', ')'
-    hidden_dim: 64
-    num_heads: 4
-    num_layers: 2
-    dropout: 0.3
-    edge_dim: 2           # backbone, base-pair
-
-  decoder:
-    embed_dim: 64
-    hidden_dim: 64
-    num_layers: 1
-    dropout: 0.3
-    vocab_size: 4          # A, U, G, C
+  node_input_dim: 3
+  hidden_dim: 128
+  num_heads: 4
+  num_layers: 4
+  dropout: 0.3
+  edge_dim: 2
+  vocab_size: 4
 
 training:
   batch_size: 32
-  learning_rate: 0.001
-  num_epochs: 100
-  teacher_forcing_start: 1.0
-  teacher_forcing_end: 0.1
+  learning_rate: 1.0e-3
+  num_epochs: 200
   weight_decay: 1.0e-3
   grad_clip: 1.0
   scheduler_patience: 5
   scheduler_factor: 0.5
   early_stopping_patience: 15
 
-inference:
-  beam_k: 5
-  max_len: 200
-  temperature: 1.0
-
-oracle:
-  mfe_threshold: -5.0
-  similarity_threshold: 0.8
+evaluation:
+  min_window_length: 25
+  max_window_length: 50

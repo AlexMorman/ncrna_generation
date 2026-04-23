@@ -41,25 +41,29 @@ def set_seed(seed: int) -> None:
 def plot_loss_curves(
     train_losses: list[float],
     val_losses: list[float],
-    val_accs: list[float],
+    val_perplexities: list[float],
+    val_recoveries: list[float],
     save_path: str,
 ) -> None:
-    """Plot and save training/validation loss curves and validation accuracy.
+    """Plot and save training/validation loss curves, perplexity, and recovery.
 
-    Two-panel figure:
+    Three-panel figure:
 
-    - **Top:** train + val cross-entropy loss with a random-baseline reference
-      line at ``ln(4) ≈ 1.386`` (4-class uniform distribution).
-    - **Bottom:** validation accuracy with a random-baseline reference at 0.25.
+    - **Top:**    Train + val cross-entropy loss with ``ln(4)`` random-baseline
+      reference line.
+    - **Middle:** Val perplexity (exp(val_loss)).
+    - **Bottom:** Val strict recovery with a 0.25 random-baseline reference
+      (uniform 4-class guess).
 
     Args:
-        train_losses: Per-epoch training losses.
-        val_losses:   Per-epoch validation losses.
-        val_accs:     Per-epoch validation accuracies (0–1).
-        save_path:    Output image path (e.g. ``"loss_curves.png"``).
+        train_losses:     Per-epoch training losses.
+        val_losses:       Per-epoch validation losses.
+        val_perplexities: Per-epoch validation perplexities.
+        val_recoveries:   Per-epoch validation recovery rates (0–1).
+        save_path:        Output image path.
     """
     epochs = range(1, len(train_losses) + 1)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 13))
 
     # ── Loss panel ──────────────────────────────────────────────────────────
     ax1.plot(epochs, train_losses, label="Train Loss")
@@ -74,18 +78,30 @@ def plot_loss_curves(
     ax1.legend()
     ax1.grid(True, alpha=0.3)
 
-    # ── Accuracy panel ──────────────────────────────────────────────────────
-    ax2.plot(epochs, val_accs, label="Val Accuracy", color="green")
+    # ── Perplexity panel ────────────────────────────────────────────────────
+    ax2.plot(epochs, val_perplexities, label="Val Perplexity", color="orange")
     ax2.axhline(
+        y=4.0, color="gray", linestyle="--", alpha=0.7,
+        label="Random baseline (4.0)",
+    )
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Perplexity")
+    ax2.set_title("Validation Perplexity")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    # ── Recovery panel ──────────────────────────────────────────────────────
+    ax3.plot(epochs, val_recoveries, label="Val Recovery", color="green")
+    ax3.axhline(
         y=0.25, color="gray", linestyle="--", alpha=0.7,
         label="Random baseline (0.25)",
     )
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Accuracy")
-    ax2.set_title("Validation Accuracy")
-    ax2.set_ylim(0, 1)
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    ax3.set_xlabel("Epoch")
+    ax3.set_ylabel("Recovery")
+    ax3.set_title("Validation Strict Recovery")
+    ax3.set_ylim(0, 1)
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -96,35 +112,28 @@ def plot_diagnostics(
     conf_matrix: np.ndarray,
     pred_counts: list[int],
     target_counts: list[int],
-    bp_rate: float,
     save_path: str,
 ) -> None:
-    """Plot a 2×2 post-training diagnostics figure saved to *save_path*.
+    """Plot a 3-panel post-training diagnostics figure saved to *save_path*.
 
     Panels:
 
-    - **Top-left:**    Confusion matrix (row-normalised) with raw counts.
-    - **Top-right:**   Per-class accuracy bar chart (A / U / G / C) vs random
-      baseline of 0.25.
-    - **Bottom-left:** Nucleotide frequency — ground-truth vs model predictions.
-    - **Bottom-right:** Base-pair satisfaction rate vs random baseline and
-      perfect score.
+    - **Left:**   Confusion matrix (row-normalised) with raw counts.
+    - **Centre:** Per-class accuracy bar chart (A / U / G / C) vs 0.25 baseline.
+    - **Right:**  Nucleotide frequency — ground-truth vs model predictions.
 
     Args:
         conf_matrix:   ``(4, 4)`` int array where ``conf_matrix[true][pred]``
                        is the count of samples with true class *true* predicted
                        as *pred*.  Row order: A=0, U=1, G=2, C=3.
-        pred_counts:   ``[A, U, G, C]`` total predicted nucleotide counts over
-                       the validation set.
+        pred_counts:   ``[A, U, G, C]`` total predicted nucleotide counts.
         target_counts: ``[A, U, G, C]`` total ground-truth nucleotide counts.
-        bp_rate:       Fraction of base-paired positions where the two predicted
-                       nucleotides form a valid Watson-Crick or G-U wobble pair.
-        save_path:     Output image path (e.g. ``"diagnostics.png"``).
+        save_path:     Output image path.
     """
-    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
-    # ── Confusion matrix (top-left) ─────────────────────────────────────────
-    ax = axes[0, 0]
+    # ── Confusion matrix ────────────────────────────────────────────────────
+    ax = axes[0]
     row_sums = conf_matrix.sum(axis=1, keepdims=True).clip(min=1)
     normalized = conf_matrix / row_sums
 
@@ -146,8 +155,8 @@ def plot_diagnostics(
                 color="white" if normalized[i, j] > 0.6 else "black",
             )
 
-    # ── Per-class accuracy (top-right) ──────────────────────────────────────
-    ax = axes[0, 1]
+    # ── Per-class accuracy ──────────────────────────────────────────────────
+    ax = axes[1]
     per_class_acc = [
         conf_matrix[i, i] / max(int(conf_matrix[i].sum()), 1)
         for i in range(4)
@@ -168,8 +177,8 @@ def plot_diagnostics(
             ha="center", va="bottom", fontsize=10,
         )
 
-    # ── Nucleotide frequency (bottom-left) ──────────────────────────────────
-    ax = axes[1, 0]
+    # ── Nucleotide frequency ────────────────────────────────────────────────
+    ax = axes[2]
     total_pred = max(sum(pred_counts), 1)
     total_target = max(sum(target_counts), 1)
     pred_freq = [c / total_pred for c in pred_counts]
@@ -187,26 +196,77 @@ def plot_diagnostics(
     ax.set_title("Nucleotide Frequency: Target vs Predicted")
     ax.legend()
 
-    # ── Base-pair satisfaction (bottom-right) ────────────────────────────────
-    # Random baseline: 6 valid ordered pairs out of 16 possible.
-    # Valid Watson-Crick + wobble: (A,U),(U,A),(G,C),(C,G),(G,U),(U,G)
-    random_bp_baseline = 6 / 16  # = 0.375
-    ax = axes[1, 1]
-    labels = ["Random\nBaseline", "Model", "Perfect"]
-    values = [random_bp_baseline, bp_rate, 1.0]
-    bar_colours = ["#9E9E9E", "#2196F3", "#4CAF50"]
-    bars = ax.bar(labels, values, color=bar_colours, alpha=0.85)
-    ax.set_ylim(0, 1.15)
-    ax.set_ylabel("Fraction of valid Watson-Crick pairs")
-    ax.set_title("Base-Pair Satisfaction Rate")
-    for bar, val in zip(bars, values):
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.02,
-            f"{val:.3f}",
-            ha="center", va="bottom", fontsize=11, fontweight="bold",
-        )
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
 
+
+def plot_per_position_recovery(
+    recoveries: list[float],
+    consensus_structure: str,
+    save_path: str,
+) -> None:
+    """Plot per-position strict recovery vs. consensus structure.
+
+    The x-axis is annotated with the dot-bracket consensus structure
+    characters so the viewer can relate recovery to structural context.
+
+    Args:
+        recoveries:          Per-position recovery rates (0–1), length N.
+        consensus_structure: Dot-bracket string of length N.
+        save_path:           Output image path.
+    """
+    n = len(recoveries)
+    positions = list(range(n))
+
+    fig, ax = plt.subplots(figsize=(max(10, n // 5), 5))
+    ax.plot(positions, recoveries, color="#2196F3", linewidth=1.5, label="Recovery")
+    ax.axhline(y=0.25, color="gray", linestyle="--", alpha=0.7, label="Random baseline (0.25)")
+    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("Consensus position")
+    ax.set_ylabel("Strict recovery")
+    ax.set_title("Per-Position Strict Recovery")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # Annotate x-axis with structure characters at a coarse stride
+    if n <= 80:
+        stride = 1
+    elif n <= 200:
+        stride = 5
+    else:
+        stride = 10
+    tick_positions = list(range(0, n, stride))
+    tick_labels = [consensus_structure[i] for i in tick_positions]
+    ax2 = ax.twiny()
+    ax2.set_xlim(ax.get_xlim())
+    ax2.set_xticks(tick_positions)
+    ax2.set_xticklabels(tick_labels, fontsize=8)
+    ax2.set_xlabel("Structure character")
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_recovery_histogram(
+    per_window_recoveries: list[float],
+    save_path: str,
+) -> None:
+    """Histogram of per-window mean recovery rates.
+
+    Args:
+        per_window_recoveries: Mean recovery rate for each evaluated window.
+        save_path:             Output image path.
+    """
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.hist(per_window_recoveries, bins=20, color="#2196F3", alpha=0.8, edgecolor="white")
+    ax.axvline(x=0.25, color="gray", linestyle="--", alpha=0.7, label="Random baseline (0.25)")
+    ax.set_xlabel("Mean recovery per window")
+    ax.set_ylabel("Count")
+    ax.set_title("Distribution of Per-Window Mean Recovery")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
