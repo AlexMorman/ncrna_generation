@@ -1,0 +1,33 @@
+{
+  "repo_root": "C:\\Users\\USER\\Downloads\\RhoDesign-main",
+  "train_csv": "C:\\Users\\USER\\OneDrive - University of Kansas\\rhodesign_manifests\\train.csv",
+  "val_csv": "C:\\Users\\USER\\OneDrive - University of Kansas\\rhodesign_manifests\\val.csv",
+  "outdir": "C:\\Users\\USER\\OneDrive - University of Kansas\\rhodesign_runs\\shared_all_families",
+  "checkpoint": "C:\\Users\\USER\\Downloads\\no_ss_apexp_best.pth",
+  "families": [],
+  "epochs": 15,
+  "batch_size": 1,
+  "grad_accum": 16,
+  "lr": 3e-05,
+  "weight_decay": 0.01,
+  "max_grad_norm": 1.0,
+  "encoder_freeze_epochs": 2,
+  "balance_families": true,
+  "amp": true,
+  "num_workers": 0,
+  "seed": 7,
+  "device_requested": "cuda",
+  "device_resolved": "cpu",
+  "train_rows": 2400,
+  "val_rows": 300,
+  "train_families": [
+    "RF04135",
+    "RF04185",
+    "RF04331"
+  ],
+  "val_families": [
+    "RF04135",
+    "RF04185",
+    "RF04331"
+  ]
+}
