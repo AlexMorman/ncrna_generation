@@ -41,7 +41,7 @@ The `RhoDesign_Model/` folder contains the scripts used to process RNA data, pre
 
 The full RhoDesign workflow is:
 
-1. Use the RhoFold pipeline to create or convert the dataset into the required structure files, including SSCT, PDB, and related outputs.
+1. Use the RhoFold pipeline to create or convert the generated subsequence dataset into the required structure files, including SSCT, PDB, and related outputs.
 2. Prepare the RhoDesign training dataset from the RhoFold output folder.
 3. Fine-tune the RhoDesign model using the prepared dataset.
 4. Test the fine-tuned model on a single PDB file.
