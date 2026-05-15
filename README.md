@@ -1,4 +1,4 @@
-## About Model
+## GNN Model Usage
 
 **Purpose**
 
